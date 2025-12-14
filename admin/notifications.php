@@ -7,27 +7,58 @@ if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'admin') {
   exit;
 }
 
+$user_id = (int) $_SESSION['user_id'];
+
+// ============================================================================
+// MARK SINGLE NOTIFICATION AS READ (SECURE)
+// ============================================================================
+
 if (isset($_GET['mark_read'])) {
   $notif_id = intval($_GET['mark_read']);
-  $conn->query("UPDATE notifications SET is_read = 1 WHERE id = $notif_id");
+  
+  $stmt = $conn->prepare("UPDATE notifications SET is_read = 1 WHERE id = ? AND user_id = ?");
+  $stmt->bind_param('ii', $notif_id, $user_id);
+  $stmt->execute();
+  $stmt->close();
+  
   header('Location: notifications.php');
   exit;
 }
 
+// ============================================================================
+// MARK ALL AS READ (SECURE)
+// ============================================================================
+
 if (isset($_GET['mark_all_read'])) {
-  $conn->query("UPDATE notifications SET is_read = 1 WHERE user_id = {$_SESSION['user_id']}");
+  $stmt = $conn->prepare("UPDATE notifications SET is_read = 1 WHERE user_id = ?");
+  $stmt->bind_param('i', $user_id);
+  $stmt->execute();
+  $stmt->close();
+  
   header('Location: notifications.php');
   exit;
 }
+
+// ============================================================================
+// DELETE NOTIFICATION (SECURE)
+// ============================================================================
 
 if (isset($_GET['delete'])) {
   $notif_id = intval($_GET['delete']);
-  $conn->query("DELETE FROM notifications WHERE id = $notif_id");
+  
+  $stmt = $conn->prepare("DELETE FROM notifications WHERE id = ? AND user_id = ?");
+  $stmt->bind_param('ii', $notif_id, $user_id);
+  $stmt->execute();
+  $stmt->close();
+  
   header('Location: notifications.php');
   exit;
 }
 
-// Create table if not exists
+// ============================================================================
+// CREATE TABLE IF NOT EXISTS
+// ============================================================================
+
 $conn->query("
   CREATE TABLE IF NOT EXISTS notifications (
     id INT AUTO_INCREMENT PRIMARY KEY,
@@ -42,16 +73,36 @@ $conn->query("
   )
 ");
 
-$notifications = $conn->query("
+// ============================================================================
+// FETCH NOTIFICATIONS (SECURE)
+// ============================================================================
+
+$stmt = $conn->prepare("
   SELECT * FROM notifications 
-  WHERE user_id = {$_SESSION['user_id']} OR user_id IS NULL
+  WHERE user_id = ? OR user_id IS NULL
   ORDER BY created_at DESC
 ");
+$stmt->bind_param('i', $user_id);
+$stmt->execute();
+$notifications = $stmt->get_result();
+$stmt->close();
 
-$unreadCount = $conn->query("
+// ============================================================================
+// UNREAD COUNT (SECURE)
+// ============================================================================
+
+$stmt = $conn->prepare("
   SELECT COUNT(*) as count FROM notifications 
-  WHERE (user_id = {$_SESSION['user_id']} OR user_id IS NULL) AND is_read = 0
-")->fetch_assoc()['count'];
+  WHERE (user_id = ? OR user_id IS NULL) AND is_read = 0
+");
+$stmt->bind_param('i', $user_id);
+$stmt->execute();
+$unreadCount = $stmt->get_result()->fetch_assoc()['count'];
+$stmt->close();
+
+// ============================================================================
+// HELPER FUNCTIONS
+// ============================================================================
 
 function getTimeAgo($timestamp) {
   $time = strtotime($timestamp);
@@ -124,8 +175,8 @@ function getNotifIcon($type) {
       <div class="notif-item <?= $isUnread ? 'unread' : '' ?>">
         <div class="notif-icon"><?= $icon ?></div>
         <div class="notif-content">
-          <div class="notif-title"><?= htmlspecialchars($notif['title']) ?></div>
-          <div class="notif-message"><?= htmlspecialchars($notif['message']) ?></div>
+          <div class="notif-title"><?= esc($notif['title']) ?></div>
+          <div class="notif-message"><?= esc($notif['message']) ?></div>
           <div class="notif-time">⏱️ <?= $timeAgo ?></div>
         </div>
         <div class="notif-actions-item">
@@ -133,7 +184,7 @@ function getNotifIcon($type) {
             <a href="?mark_read=<?= $notif['id'] ?>" class="btn-mark-read">Mark Read</a>
           <?php endif; ?>
           <?php if ($notif['link']): ?>
-            <a href="<?= htmlspecialchars($notif['link']) ?>" style="background: #2563eb; color: white;">View</a>
+            <a href="<?= esc($notif['link']) ?>" style="background: #2563eb; color: white;">View</a>
           <?php endif; ?>
           <a href="?delete=<?= $notif['id'] ?>" class="btn-delete" onclick="return confirm('Delete?')">Delete</a>
         </div>
@@ -141,7 +192,7 @@ function getNotifIcon($type) {
       <?php endwhile; ?>
     <?php else: ?>
       <div class="empty-state">
-        <div class="empty-state-icon">📭</div>
+        <div class="empty-state-icon">🔭</div>
         <h3 style="color: #374151; margin-bottom: 10px;">No Notifications</h3>
         <p>You're all caught up! New notifications will appear here.</p>
       </div>

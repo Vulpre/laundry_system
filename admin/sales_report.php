@@ -1,39 +1,64 @@
 <?php
 session_start();
 require '../db_connect.php';
-if (!isset($_SESSION['user_id']) || $_SESSION['role']!=='admin') header('Location: ../index.php');
+
+if (!isset($_SESSION['user_id']) || $_SESSION['role'] !== 'admin') {
+    header('Location: ../index.php');
+    exit;
+}
 
 $err = '';
 $success = '';
 
-// ✅ Clear sales report when button is clicked
+// ============================================================================
+// CLEAR SALES DATA
+// ============================================================================
+
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['clear_sales'])) {
   $delete = $conn->query("DELETE FROM orders");
   if ($delete) {
     $success = "✅ All sales data has been cleared successfully!";
+    error_log("All sales data cleared by admin {$_SESSION['name']} (ID: {$_SESSION['user_id']})");
   } else {
     $err = "❌ Failed to clear sales report: " . $conn->error;
   }
 }
 
-$from = $_GET['from'] ?? date('Y-m-d', strtotime('-7 days'));
-$to = $_GET['to'] ?? date('Y-m-d');
+// ============================================================================
+// DATE FILTERS (SECURE)
+// ============================================================================
+
+$from = sanitizeText($_GET['from'] ?? date('Y-m-d', strtotime('-7 days')), 20);
+$to = sanitizeText($_GET['to'] ?? date('Y-m-d'), 20);
+
+// Validate date format
+if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $from)) {
+    $from = date('Y-m-d', strtotime('-7 days'));
+}
+if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $to)) {
+    $to = date('Y-m-d');
+}
+
+// ============================================================================
+// FETCH SALES DATA (SECURE)
+// ============================================================================
 
 $stmt = $conn->prepare('
-  SELECT DATE(created_at) as d, COUNT(*) as orders, IFNULL(SUM(total_cost),0) as revenue
+  SELECT 
+    DATE(created_at) as d, 
+    COUNT(*) as orders, 
+    IFNULL(SUM(total_cost),0) as revenue
   FROM orders
   WHERE DATE(created_at) BETWEEN ? AND ?
   GROUP BY DATE(created_at)
   ORDER BY DATE(created_at) ASC
 ');
+
 $stmt->bind_param('ss', $from, $to);
 $stmt->execute();
-$res = $stmt->get_result();
-$data = $res->fetch_all(MYSQLI_ASSOC);
-
-function esc($str) {
-  return htmlspecialchars($str ?? '', ENT_QUOTES, 'UTF-8');
-}
+$result = $stmt->get_result();
+$data = $result->fetch_all(MYSQLI_ASSOC);
+$stmt->close();
 ?>
 <!doctype html>
 <html>
@@ -58,6 +83,7 @@ button {
   border-radius: 6px;
   cursor: pointer;
   transition: 0.3s;
+  font-weight: 600;
 }
 button:hover {
   background: #1e40af;
@@ -97,6 +123,28 @@ button:hover {
   background: #2563eb;
   color: white;
 }
+form[method="get"] {
+  display: grid;
+  grid-template-columns: 1fr 1fr auto;
+  gap: 15px;
+  align-items: end;
+  margin-bottom: 20px;
+  padding: 20px;
+  background: #f9fafb;
+  border-radius: 8px;
+}
+form[method="get"] label {
+  display: block;
+  font-weight: 600;
+  margin-bottom: 6px;
+  color: #374151;
+}
+form[method="get"] input {
+  width: 100%;
+  padding: 10px;
+  border: 2px solid #e5e7eb;
+  border-radius: 8px;
+}
 </style>
 </head>
 <body>
@@ -105,14 +153,18 @@ button:hover {
 <div class="card">
   <h2>📊 Sales Report</h2>
 
-  <?php if($err): ?><div class="error"><?=esc($err)?></div><?php endif; ?>
-  <?php if($success): ?><div class="success"><?=esc($success)?></div><?php endif; ?>
+  <?php if($err): ?><div class="error"><?= esc($err) ?></div><?php endif; ?>
+  <?php if($success): ?><div class="success"><?= esc($success) ?></div><?php endif; ?>
 
   <form method="get">
-    <label>From</label>
-    <input type="date" name="from" value="<?=esc($from)?>" required>
-    <label>To</label>
-    <input type="date" name="to" value="<?=esc($to)?>" required>
+    <div>
+      <label>From</label>
+      <input type="date" name="from" value="<?= esc($from) ?>" required>
+    </div>
+    <div>
+      <label>To</label>
+      <input type="date" name="to" value="<?= esc($to) ?>" required>
+    </div>
     <button type="submit">🔍 Filter</button>
   </form>
 
@@ -129,9 +181,9 @@ button:hover {
     <?php if (count($data) > 0): ?>
       <?php foreach($data as $r): ?>
         <tr>
-          <td><?=esc($r['d'])?></td>
-          <td><?=esc($r['orders'])?></td>
-          <td>₱<?=number_format($r['revenue'],2)?></td>
+          <td><?= esc($r['d']) ?></td>
+          <td><?= esc($r['orders']) ?></td>
+          <td>₱<?= number_format($r['revenue'],2) ?></td>
         </tr>
       <?php endforeach; ?>
     <?php else: ?>
